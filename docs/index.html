@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>atmux - Multi-agent Claude orchestration</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #f0883e;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 80px 0 60px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 3rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero p {
+    font-size: 1.25rem;
+    color: var(--text-dim);
+    max-width: 540px;
+    margin: 0 auto 32px;
+  }
+  .hero-install {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 24px;
+    display: inline-block;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.95rem;
+    color: var(--green);
+  }
+  .hero-install .dim { color: var(--text-dim); }
+
+  /* Sections */
+  section {
+    padding: 60px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  section:last-child { border-bottom: none; }
+  section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 24px;
+    color: var(--text);
+  }
+  section h3 {
+    font-size: 1.1rem;
+    margin: 24px 0 12px;
+    color: var(--text);
+  }
+  section p, section li {
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  section ul { padding-left: 24px; }
+  section li { margin-bottom: 8px; }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 16px 0;
+    color: var(--text);
+  }
+  code {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.875rem;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .comment { color: var(--text-dim); }
+  .cmd { color: var(--green); }
+  .flag { color: var(--accent); }
+
+  /* Features grid */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  .feature {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .feature h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+  }
+  .feature p {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  /* Dashboard preview */
+  .preview {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 24px 0;
+  }
+  .preview .idle { color: var(--text-dim); }
+  .preview .busy { color: var(--accent); }
+  .preview .title { color: var(--text); font-weight: bold; }
+  .preview .dim { color: #484f58; }
+  .preview .header { background: #21262d; display: block; text-align: center; padding: 4px; font-weight: bold; color: var(--text); }
+
+  /* Footer */
+  footer {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 600px) {
+    .hero h1 { font-size: 2rem; }
+    .features { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="hero">
+    <h1><span>atmux</span></h1>
+    <p>Run multiple Claude Code agents in a single tmux session. Add agents, point them at repos, and monitor everything from a live dashboard.</p>
+    <div class="hero-install">
+      <span class="dim">$</span> brew install juanheyns/tmux/atmux
+    </div>
+  </div>
+
+  <section>
+    <h2>What is atmux?</h2>
+    <p>atmux is a lightweight orchestration shell for Claude Code. It manages multiple Claude instances inside tmux, each pointed at a repository. A curses-based dashboard shows real-time status, and hooks track whether each agent is idle, busy, or running subagents.</p>
+
+    <div class="features">
+      <div class="feature">
+        <h3>Multi-agent</h3>
+        <p>Spin up as many Claude instances as you need, each in its own tmux window with its own repo.</p>
+      </div>
+      <div class="feature">
+        <h3>Live dashboard</h3>
+        <p>Real-time overview with status indicators, subagent counts, and an interactive command bar.</p>
+      </div>
+      <div class="feature">
+        <h3>Workspace state</h3>
+        <p>Agent configs persist across sessions. Stop and restart without losing your setup.</p>
+      </div>
+      <div class="feature">
+        <h3>Extensible widgets</h3>
+        <p>Drop executable scripts in <code>.atmux/widgets/</code> to add custom sections to the dashboard.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Dashboard</h2>
+    <div class="preview">
+      <span class="header">atmux</span>
+<span class="idle">  workspace: ~/projects/my-app</span>
+
+<span class="dim">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
+  <span class="title">Agents</span>
+   <span class="busy">&#9679;+3</span> <span class="busy">backend        owner/api-service</span>
+   <span class="idle">&#9675;</span>   <span class="idle">frontend       owner/web-app</span>
+   <span class="busy">&#9679;</span>   <span class="busy">infra          ./terraform</span>
+
+<span class="dim">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
+  <span class="title">Git Status</span>
+    <span class="idle">backend: feature/auth (3 changed)</span>
+    <span class="idle">frontend: main (clean)</span>
+    <span class="idle">infra: main (1 changed)</span>
+
+<span class="dim">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
+ <span class="title">&#10095;</span> <span class="dim">_</span>
+<span class="dim">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Installation</h2>
+
+    <h3>Homebrew (recommended)</h3>
+<pre><span class="cmd">brew install</span> juanheyns/tmux/atmux</pre>
+
+    <h3>Manual install</h3>
+<pre><span class="cmd">curl -fsSL</span> https://raw.githubusercontent.com/juanheyns/agent-tmux/main/install.sh | bash</pre>
+
+    <h3>From source</h3>
+<pre><span class="cmd">git clone</span> https://github.com/juanheyns/agent-tmux.git
+<span class="cmd">cd</span> agent-tmux
+<span class="cmd">./install.sh</span></pre>
+
+    <h3>Requirements</h3>
+    <ul>
+      <li><a href="https://github.com/tmux/tmux">tmux</a></li>
+      <li><a href="https://claude.ai/code">Claude Code</a> (<code>claude</code> CLI)</li>
+      <li>Python 3.10+</li>
+      <li><a href="https://cli.github.com">gh CLI</a> (optional, for cloning with <code>owner/repo</code> shorthand)</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Quick start</h2>
+<pre><span class="comment"># Initialize a workspace</span>
+<span class="cmd">cd</span> ~/projects/my-workspace
+<span class="cmd">atmux init</span>
+
+<span class="comment"># Add agents</span>
+<span class="cmd">atmux add</span> backend owner/api-service          <span class="comment"># clone from GitHub</span>
+<span class="cmd">atmux add</span> frontend https://gh.corp/ui.git    <span class="comment"># full URL</span>
+<span class="cmd">atmux add</span> infra ./terraform                   <span class="comment"># local directory</span>
+
+<span class="comment"># Launch</span>
+<span class="cmd">atmux start</span>
+
+<span class="comment"># Later — agents persist across sessions</span>
+<span class="cmd">atmux stop</span>
+<span class="cmd">atmux start</span>   <span class="comment"># all agents restored</span></pre>
+
+    <h3>Custom Claude flags</h3>
+    <p>Pass extra flags to Claude on a per-agent basis. Flags after <code>--</code> are persisted and restored on start.</p>
+<pre><span class="cmd">atmux add</span> dev1 owner/repo <span class="flag">-- --model sonnet --max-turns 50</span>
+<span class="cmd">atmux add</span> reviewer owner/repo <span class="flag">-- --permission-mode default</span></pre>
+  </section>
+
+  <section>
+    <h2>Commands</h2>
+
+    <h3>CLI</h3>
+<pre>atmux init                              <span class="comment"># Initialize workspace</span>
+atmux start                             <span class="comment"># Launch session (default)</span>
+atmux stop                              <span class="comment"># Stop all agents</span>
+atmux add &lt;name&gt; &lt;repo&gt; [-- flags]      <span class="comment"># Add an agent</span>
+atmux remove &lt;name&gt;                     <span class="comment"># Remove an agent</span>
+atmux send &lt;name&gt; &lt;msg&gt;                 <span class="comment"># Send message to agent</span>
+atmux list                              <span class="comment"># List configured agents</span>
+atmux heartbeat &lt;name|all&gt; &lt;s&gt; &lt;msg&gt;   <span class="comment"># Set heartbeat</span>
+atmux heartbeat stop &lt;name|all&gt;         <span class="comment"># Stop heartbeat</span>
+atmux heartbeat list                    <span class="comment"># List heartbeats</span></pre>
+
+    <h3>Dashboard commands</h3>
+    <p>Type these in the dashboard's command bar:</p>
+<pre>:add &lt;name&gt; &lt;repo&gt; [-- flags]          <span class="comment"># Add agent</span>
+:send &lt;name&gt; &lt;msg&gt;                     <span class="comment"># Send message</span>
+:remove &lt;name&gt;                         <span class="comment"># Remove agent</span>
+:heartbeat &lt;name|all&gt; &lt;s&gt; &lt;msg&gt;       <span class="comment"># Set heartbeat</span>
+:heartbeat stop &lt;name|all&gt;             <span class="comment"># Stop heartbeat</span>
+:stop                                  <span class="comment"># Stop everything</span></pre>
+
+    <h3>tmux navigation</h3>
+<pre>Ctrl-a n/p    <span class="comment"># Next/previous window</span>
+Ctrl-a w      <span class="comment"># Window picker</span>
+Ctrl-a d      <span class="comment"># Detach (agents keep running)</span></pre>
+  </section>
+
+  <section>
+    <h2>Widgets</h2>
+    <p>Extend the dashboard with custom scripts. Drop an executable in <code>.atmux/widgets/</code> and it appears as a section.</p>
+
+<pre><span class="comment"># .atmux/widgets/git-status</span>
+<span class="cmd">#!/usr/bin/env bash</span>
+if [[ "$1" == "--setup" ]]; then
+  echo '{"title": "Git Status", "interval": 15}'
+  exit 0
+fi
+
+for dir in "$ATMUX_WORKSPACE"/agents/*/; do
+  name=$(basename "$dir")
+  branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+  echo "$name: $branch"
+done</pre>
+
+    <h3>Widget protocol</h3>
+    <ul>
+      <li><strong><code>--setup</code></strong> &mdash; Return JSON with <code>title</code> and <code>interval</code> (seconds). Optional; defaults to filename and 10s.</li>
+      <li><strong>Normal run</strong> &mdash; Print lines to stdout. Each line becomes a row in the dashboard section.</li>
+      <li><strong>Environment</strong> &mdash; <code>ATMUX_WORKSPACE</code> and <code>ATMUX_DIR</code> are available.</li>
+      <li><strong>Timeout</strong> &mdash; Scripts that take &gt;2s are automatically backed off to 3x their runtime.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Workspace layout</h2>
+<pre>.atmux/
+  config.json       <span class="comment"># Session name, workspace settings</span>
+  agents.json       <span class="comment"># Persisted agent list</span>
+  heartbeats.json   <span class="comment"># Heartbeat configs</span>
+  status/           <span class="comment"># Runtime state (ephemeral)</span>
+  widgets/          <span class="comment"># Custom dashboard scripts</span>
+agents/
+  backend/          <span class="comment"># Cloned repos live here</span>
+  frontend/</pre>
+  </section>
+
+  <section>
+    <h2>Debugging</h2>
+    <p>Set <code>ATMUX_DEBUG=1</code> in the agent's environment to enable hook logging to <code>.atmux/status/hooks.log</code>.</p>
+<pre><span class="comment"># In your atmux start, or export before launching:</span>
+<span class="cmd">export</span> ATMUX_DEBUG=1
+<span class="cmd">atmux start</span>
+
+<span class="comment"># Watch the log</span>
+<span class="cmd">tail -f</span> .atmux/status/hooks.log</pre>
+  </section>
+
+  <footer>
+    <p>MIT License &mdash; <a href="https://github.com/juanheyns/agent-tmux">GitHub</a></p>
+  </footer>
+</div>
+
+</body>
+</html>

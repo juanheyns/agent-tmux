@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="atmux"
+
+usage() {
+  cat <<EOF
+Usage: send <agent> <message>
+
+Send a message to a Claude agent's tmux window.
+
+Examples:
+  ./send dev1 "implement the login endpoint from issue #5"
+  ./send dev2 "run the full test suite and report results"
+EOF
+  exit 0
+}
+
+[[ $# -lt 2 || "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
+
+AGENT="$1"
+shift
+MESSAGE="$*"
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "Error: No atmux session running. Start with: atmux start"
+  exit 1
+fi
+
+if ! tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | grep -qx "$AGENT"; then
+  echo "Error: No agent named '$AGENT'"
+  echo "Active windows:"
+  tmux list-windows -t "$SESSION" -F "  #W" 2>/dev/null | grep -v "overview" || echo "  (none)"
+  exit 1
+fi
+
+tmux send-keys -t "$SESSION:$AGENT" "$MESSAGE" Enter
+echo "Sent to $AGENT: $MESSAGE"

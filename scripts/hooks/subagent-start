@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+STATUS_DIR="${ATMUX_WORKSPACE:-.}/.atmux/status"
+AGENT_NAME="${ATMUX_AGENT:-unknown}"
+COUNT_FILE="$STATUS_DIR/${AGENT_NAME}.subagents"
+LOCK="$STATUS_DIR/${AGENT_NAME}.lock"
+
+tries=0; while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; tries=$((tries+1)); [[ $tries -ge 100 ]] && break; done
+trap "rmdir '$LOCK' 2>/dev/null" EXIT
+
+current=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
+new_count=$(( current + 1 ))
+echo "$new_count" > "$COUNT_FILE"
+
+[[ -n "$ATMUX_DEBUG" ]] && echo "[$(date '+%H:%M:%S')] subagent-start agent=$AGENT_NAME count=$current->$new_count" >> "$STATUS_DIR/hooks.log"
+
+tmux set-window-option -t "$ATMUX_SESSION:$AGENT_NAME" window-status-style "fg=colour214" 2>/dev/null || true
+tmux set-window-option -t "$ATMUX_SESSION:$AGENT_NAME" window-status-current-style "fg=colour235,bg=colour214,bold" 2>/dev/null || true

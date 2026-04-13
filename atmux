@@ -1,0 +1,418 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve through symlinks to find the real install directory
+ATMUX_SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$ATMUX_SOURCE" ]]; do
+  ATMUX_DIR="$(cd "$(dirname "$ATMUX_SOURCE")" && pwd)"
+  ATMUX_SOURCE="$(readlink "$ATMUX_SOURCE")"
+  [[ "$ATMUX_SOURCE" != /* ]] && ATMUX_SOURCE="$ATMUX_DIR/$ATMUX_SOURCE"
+done
+ATMUX_DIR="$(cd "$(dirname "$ATMUX_SOURCE")" && pwd)"
+TMUX_CONF="$ATMUX_DIR/.tmux.conf"
+
+usage() {
+  cat <<EOF
+Usage: atmux <command>
+
+Commands:
+  init                              Initialize a new workspace
+  start                             Launch the atmux session (or just: atmux)
+  stop                              Stop all agents and the session
+  add <name> <repo> [-- flags]      Add a new agent (extra claude flags after --)
+  remove <name>                     Remove an agent
+  send <name> <msg>                 Send a message to an agent
+  list                              List configured agents
+  heartbeat <name|all> <secs> <msg> Set a heartbeat for idle agents
+  heartbeat stop <name|all>         Stop a heartbeat
+  heartbeat list                    List active heartbeats
+  help                              Show this help
+
+Run 'atmux init' first, then 'atmux start' to launch.
+EOF
+  exit 0
+}
+
+# Find the workspace (.atmux/ in cwd or parents)
+find_workspace() {
+  local d
+  d="$(pwd)"
+  while true; do
+    if [[ -d "$d/.atmux" ]]; then
+      echo "$d"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      return 1
+    fi
+    d="$parent"
+  done
+}
+
+require_workspace() {
+  WORKSPACE="$(find_workspace)" || {
+    echo "Error: Not in an atmux workspace. Run 'atmux init' first."
+    exit 1
+  }
+  SESSION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/.atmux/config.json')).get('session', 'atmux'))" 2>/dev/null || echo "atmux")
+}
+
+# --- Commands ---
+
+cmd_init() {
+  if [[ -d ".atmux" ]]; then
+    echo "Workspace already initialized in $(pwd)"
+    exit 0
+  fi
+
+  python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import init_workspace
+from pathlib import Path
+init_workspace(Path('.').resolve())
+"
+  echo "Initialized atmux workspace in $(pwd)"
+  echo "  .atmux/config.json   — workspace settings"
+  echo "  .atmux/agents.json   — agent registry"
+  echo ""
+  echo "Next: atmux add <name> <repo>   then   atmux start"
+}
+
+cmd_start() {
+  require_workspace
+
+  # Preflight
+  if ! command -v tmux &>/dev/null; then
+    echo "Error: tmux is not installed. Run: brew install tmux"
+    exit 1
+  fi
+  if ! command -v claude &>/dev/null; then
+    echo "Error: claude is not installed."
+    exit 1
+  fi
+
+  # Handle existing session
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    read -rp "Session '$SESSION' already exists. Kill it? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+      tmux kill-session -t "$SESSION"
+    else
+      echo "Attaching to existing session..."
+      exec tmux attach -t "$SESSION"
+    fi
+  fi
+
+  echo "Launching atmux..."
+  echo "Workspace: $WORKSPACE"
+
+  # Ensure status dir
+  mkdir -p "$WORKSPACE/.atmux/status"
+
+  # Window 0: overview dashboard
+  tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n "overview" -c "$WORKSPACE"
+  tmux send-keys -t "$SESSION:overview" \
+    "export ATMUX_DIR='$ATMUX_DIR' ATMUX_SESSION='$SESSION' ATMUX_WORKSPACE='$WORKSPACE'; cd '$ATMUX_DIR' && python3 -m src dashboard '$WORKSPACE'" Enter
+
+  # Launch persisted agents
+  agents_json="$WORKSPACE/.atmux/agents.json"
+  if [[ -f "$agents_json" ]]; then
+    agent_count=$(python3 -c "import json; print(len(json.load(open('$agents_json'))))" 2>/dev/null || echo "0")
+
+    if [[ "$agent_count" -gt 0 ]]; then
+      echo "Restoring $agent_count agent(s)..."
+      python3 -c "
+import json
+for a in json.load(open('$agents_json')):
+    print(a['name'] + '\t' + a['dir'] + '\t' + a.get('flags', ''))
+" | while IFS=$'\t' read -r name agent_dir agent_flags; do
+        if [[ ! -d "$agent_dir" ]]; then
+          echo "  Skipping $name — directory not found: $agent_dir"
+          continue
+        fi
+
+        echo "  Starting $name -> $agent_dir"
+
+        tmux new-window -t "$SESSION" -n "$name" -c "$agent_dir"
+
+        # Initialize status
+        echo "idle" > "$WORKSPACE/.atmux/status/$name"
+        echo "0" > "$WORKSPACE/.atmux/status/${name}.subagents"
+
+        # Export env vars and launch claude in a single command so env is guaranteed set
+        settings_path="$ATMUX_DIR/settings/agent.json"
+        local extra=""
+        [[ -n "$agent_flags" ]] && extra=" $agent_flags"
+        tmux send-keys -t "$SESSION:$name" \
+          "export ATMUX_AGENT=$name ATMUX_SESSION='$SESSION' ATMUX_DIR='$ATMUX_DIR' ATMUX_WORKSPACE='$WORKSPACE' && claude --permission-mode auto --settings '$settings_path' --name \"$name\"$extra" Enter
+      done
+
+      # Wait for Claude sessions to initialize
+      sleep 3
+    fi
+  fi
+
+  # Focus overview
+  tmux select-window -t "$SESSION:overview"
+
+  echo "Attaching..."
+  exec tmux attach -t "$SESSION"
+}
+
+cmd_stop() {
+  require_workspace
+
+  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "No atmux session running."
+    exit 0
+  fi
+
+  echo "Stopping atmux..."
+
+  # Send /exit to all agent windows
+  tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | while read -r window; do
+    if [[ "$window" != "overview" ]]; then
+      echo "  Stopping $window..."
+      tmux send-keys -t "$SESSION:$window" "/exit" Enter 2>/dev/null || true
+    fi
+  done
+
+  # Stop overview
+  tmux send-keys -t "$SESSION:overview" "q" 2>/dev/null || true
+
+  sleep 3
+
+  # Clean up runtime status
+  rm -f "$WORKSPACE/.atmux/status/"* 2>/dev/null || true
+
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+  echo "atmux stopped. Agents preserved in .atmux/agents.json."
+}
+
+cmd_add() {
+  require_workspace
+
+  local name="${1:-}"
+  local repo="${2:-}"
+  shift 2 2>/dev/null || true
+
+  # Collect extra claude flags after --
+  local claude_flags=""
+  local found_dashdash=false
+  for arg in "$@"; do
+    if [[ "$found_dashdash" == true ]]; then
+      claude_flags="$claude_flags $arg"
+    elif [[ "$arg" == "--" ]]; then
+      found_dashdash=true
+    fi
+  done
+
+  if [[ -z "$name" || -z "$repo" ]]; then
+    echo "Usage: atmux add <name> <repo-or-path> [-- extra-claude-flags]"
+    echo ""
+    echo "  <repo-or-path> can be:"
+    echo "    owner/repo                      GitHub shorthand"
+    echo "    https://github.com/owner/repo   Full URL (any git host)"
+    echo "    git@host:owner/repo.git         SSH URL"
+    echo "    /absolute/path                  Existing local directory"
+    echo "    ./relative/path                 Existing local directory"
+    echo ""
+    echo "  Extra flags are passed to claude on launch, e.g.:"
+    echo "    atmux add dev1 owner/repo -- --model sonnet"
+    exit 1
+  fi
+
+  # Determine working directory
+  local agent_dir
+  if [[ "$repo" == /* || "$repo" == ./* || "$repo" == ~* ]]; then
+    local expanded="${repo/#\~/$HOME}"
+    agent_dir="$(cd "$WORKSPACE" && cd "$expanded" && pwd)"
+    if [[ ! -d "$agent_dir" ]]; then
+      echo "Error: Directory not found: $repo"
+      exit 1
+    fi
+  else
+    agent_dir="$WORKSPACE/agents/$name"
+    if [[ ! -d "$agent_dir/.git" ]]; then
+      echo "Cloning $repo into agents/$name/..."
+      mkdir -p "$agent_dir"
+      # Use git clone for URLs, gh repo clone for owner/repo shorthand
+      if [[ "$repo" == https://* || "$repo" == http://* || "$repo" == git@* || "$repo" == ssh://* ]]; then
+        git clone --quiet "$repo" "$agent_dir"
+      else
+        gh repo clone "$repo" "$agent_dir" -- --quiet
+      fi
+    else
+      echo "Already cloned."
+    fi
+  fi
+
+  # Persist to agents.json (with optional flags)
+  python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import add_agent
+from pathlib import Path
+add_agent(Path('$WORKSPACE'), '$name', '$repo', '$agent_dir', flags='${claude_flags# }')
+"
+  echo "Added agent '$name' -> $repo"
+  echo "  dir: $agent_dir"
+  [[ -n "$claude_flags" ]] && echo "  flags:$claude_flags"
+
+  # If session is running, also launch it live
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    tmux new-window -t "$SESSION" -n "$name" -c "$agent_dir"
+
+    mkdir -p "$WORKSPACE/.atmux/status"
+    echo "idle" > "$WORKSPACE/.atmux/status/$name"
+    echo "0" > "$WORKSPACE/.atmux/status/${name}.subagents"
+
+    settings_path="$ATMUX_DIR/settings/agent.json"
+    tmux send-keys -t "$SESSION:$name" \
+      "export ATMUX_AGENT=$name ATMUX_SESSION='$SESSION' ATMUX_DIR='$ATMUX_DIR' ATMUX_WORKSPACE='$WORKSPACE' && claude --permission-mode auto --settings '$settings_path' --name \"$name\"$claude_flags" Enter
+    echo "Agent launched in session."
+  fi
+}
+
+cmd_remove() {
+  require_workspace
+
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    echo "Usage: atmux remove <name>"
+    exit 1
+  fi
+
+  # Remove from agents.json
+  python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import remove_agent
+from pathlib import Path
+remove_agent(Path('$WORKSPACE'), '$name')
+"
+
+  # If session running, stop the window
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    tmux send-keys -t "$SESSION:$name" "/exit" Enter 2>/dev/null || true
+    sleep 1
+    tmux kill-window -t "$SESSION:$name" 2>/dev/null || true
+  fi
+
+  # Clean status files
+  rm -f "$WORKSPACE/.atmux/status/$name" "$WORKSPACE/.atmux/status/${name}.subagents" "$WORKSPACE/.atmux/status/${name}.repo" 2>/dev/null || true
+
+  echo "Removed agent '$name'"
+}
+
+cmd_send() {
+  require_workspace
+
+  local name="${1:-}"
+  shift || true
+  local msg="$*"
+
+  if [[ -z "$name" || -z "$msg" ]]; then
+    echo "Usage: atmux send <name> <message>"
+    exit 1
+  fi
+
+  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "Error: No atmux session running. Run: atmux start"
+    exit 1
+  fi
+
+  tmux send-keys -t "$SESSION:$name" "$msg" Enter
+  echo "Sent to $name: $msg"
+}
+
+cmd_list() {
+  require_workspace
+
+  echo "Workspace: $WORKSPACE"
+  echo ""
+
+  python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from pathlib import Path
+agents = load_agents(Path('$WORKSPACE'))
+if not agents:
+    print('  No agents configured. Use: atmux add <name> <repo>')
+else:
+    for a in agents:
+        print(f\"  {a['name']:<16} {a['repo']:<30} {a['dir']}\")
+"
+}
+
+cmd_heartbeat() {
+  require_workspace
+
+  local subcmd="${1:-}"
+
+  if [[ "$subcmd" == "list" ]]; then
+    python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_heartbeats
+from pathlib import Path
+hbs = load_heartbeats(Path('$WORKSPACE'))
+if not hbs:
+    print('  No heartbeats configured.')
+else:
+    for h in hbs:
+        print(f\"  {h['agent']:<14} every {h['interval']}s: {h['message']}\")
+"
+    return
+  fi
+
+  if [[ "$subcmd" == "stop" ]]; then
+    local target="${2:-all}"
+    python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import remove_heartbeat
+from pathlib import Path
+remove_heartbeat(Path('$WORKSPACE'), '$target')
+"
+    echo "Heartbeat stopped for $target"
+    return
+  fi
+
+  local agent="${1:-}"
+  local interval="${2:-}"
+  local msg="${3:-}"
+
+  if [[ -z "$agent" || -z "$interval" || -z "$msg" ]]; then
+    echo "Usage: atmux heartbeat <agent|all> <seconds> <message>"
+    echo "       atmux heartbeat stop <agent|all>"
+    echo "       atmux heartbeat list"
+    exit 1
+  fi
+
+  python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import set_heartbeat
+from pathlib import Path
+set_heartbeat(Path('$WORKSPACE'), '$agent', $interval, '$msg')
+"
+  echo "Heartbeat set: $agent every ${interval}s"
+}
+
+# --- Dispatch ---
+
+cmd="${1:-start}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+  init)       cmd_init ;;
+  start)      cmd_start ;;
+  stop)       cmd_stop ;;
+  add)        cmd_add "$@" ;;
+  remove)     cmd_remove "$@" ;;
+  send)       cmd_send "$@" ;;
+  list|ls)    cmd_list ;;
+  heartbeat)  cmd_heartbeat "$@" ;;
+  -h|--help|help) usage ;;
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    ;;
+esac

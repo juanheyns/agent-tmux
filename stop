@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKSPACE="${ATMUX_WORKSPACE:-$(pwd)}"
+SESSION="atmux"
+
+# Try to read session name from workspace config
+if [[ -f "$WORKSPACE/.atmux/config.json" ]]; then
+  SESSION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/.atmux/config.json')).get('session', 'atmux'))" 2>/dev/null || echo "atmux")
+fi
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "No atmux session running."
+  exit 0
+fi
+
+echo "Stopping atmux..."
+
+# Send /exit to all agent windows
+tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | while read -r window; do
+  if [[ "$window" != "overview" ]]; then
+    echo "  Stopping $window..."
+    tmux send-keys -t "$SESSION:$window" "/exit" Enter 2>/dev/null || true
+  fi
+done
+
+# Stop overview
+tmux send-keys -t "$SESSION:overview" "q" 2>/dev/null || true
+
+sleep 3
+
+# Clean runtime status
+rm -f "$WORKSPACE/.atmux/status/"* 2>/dev/null || true
+
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+echo "atmux stopped. Agents preserved in .atmux/agents.json."

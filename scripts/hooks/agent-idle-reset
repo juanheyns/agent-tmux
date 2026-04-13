@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+STATUS_DIR="${ATMUX_WORKSPACE:-.}/.atmux/status"
+AGENT_NAME="${ATMUX_AGENT:-unknown}"
+
+[[ -n "$ATMUX_DEBUG" ]] && echo "[$(date '+%H:%M:%S')] idle-reset     agent=$AGENT_NAME" >> "$STATUS_DIR/hooks.log"
+
+echo "idle" > "$STATUS_DIR/$AGENT_NAME"
+echo "0" > "$STATUS_DIR/${AGENT_NAME}.subagents"
+
+tmux set-window-option -t "$ATMUX_SESSION:$AGENT_NAME" window-status-format " #I:#W " 2>/dev/null || true
+tmux set-window-option -t "$ATMUX_SESSION:$AGENT_NAME" window-status-style "fg=colour245" 2>/dev/null || true
+tmux set-window-option -t "$ATMUX_SESSION:$AGENT_NAME" window-status-current-style "fg=colour235,bg=colour248,bold" 2>/dev/null || true

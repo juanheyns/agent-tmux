@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: .
+          additional_files: atmux send stop
+        env:
+          SHELLCHECK_OPTS: -e SC1091 -e SC2086
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check
+        run: ruff check src/
+
+      - name: Ruff format check
+        run: ruff format --check src/
+
+      - name: Validate JSON
+        run: python3 -c "import json, sys; json.load(open('settings/agent.json')); print('agent.json OK')"
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tmux
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y tmux
+          fi
+
+      - name: Python unit tests
+        run: python3 -m pytest tests/ -v
+
+      - name: Smoke test - help
+        run: ./atmux help
+
+      - name: Smoke test - init
+        run: |
+          mkdir -p /tmp/test-ws && cd /tmp/test-ws
+          $GITHUB_WORKSPACE/atmux init
+          test -f .atmux/config.json
+          test -f .atmux/agents.json
+          test -d .atmux/status
+          test -d .atmux/widgets
+          echo "init OK"
+
+      - name: Smoke test - add (local path)
+        run: |
+          cd /tmp/test-ws
+          mkdir -p /tmp/test-repo && git -C /tmp/test-repo init --quiet
+          $GITHUB_WORKSPACE/atmux add test-agent /tmp/test-repo
+          python3 -c "
+          import json
+          agents = json.load(open('.atmux/agents.json'))
+          assert len(agents) == 1
+          assert agents[0]['name'] == 'test-agent'
+          print('add OK')
+          "
+
+      - name: Smoke test - list
+        run: |
+          cd /tmp/test-ws
+          $GITHUB_WORKSPACE/atmux list | grep test-agent
+
+      - name: Smoke test - remove
+        run: |
+          cd /tmp/test-ws
+          $GITHUB_WORKSPACE/atmux remove test-agent
+          python3 -c "
+          import json
+          agents = json.load(open('.atmux/agents.json'))
+          assert len(agents) == 0
+          print('remove OK')
+          "

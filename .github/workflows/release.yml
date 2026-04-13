@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+      - name: Get release info
+        id: release_info
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          curl -sL "$TARBALL_URL" -o /tmp/release.tar.gz
+          SHA256=$(shasum -a 256 /tmp/release.tar.gz | awk '{print $1}')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "tarball_url=$TARBALL_URL" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+          echo "SHA256: $SHA256"
+
+      - name: Update Homebrew tap
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          repository: juanheyns/homebrew-tmux
+          event-type: update-formula
+          client-payload: |
+            {
+              "formula": "atmux",
+              "version": "${{ steps.release_info.outputs.version }}",
+              "tag": "${{ steps.release_info.outputs.tag }}",
+              "sha256": "${{ steps.release_info.outputs.sha256 }}",
+              "tarball_url": "${{ steps.release_info.outputs.tarball_url }}"
+            }
