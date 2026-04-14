@@ -1,0 +1,17 @@
+# Codex CLI hooks for atmux status tracking.
+# Provisional — verify against Codex docs if hooks don't fire.
+
+[[hooks]]
+event = "SessionStart"
+command = "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/session-start"
+timeout = 5
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/agent-busy"
+timeout = 5
+
+[[hooks]]
+event = "Stop"
+command = "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/agent-idle"
+timeout = 5

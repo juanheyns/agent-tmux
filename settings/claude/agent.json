@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/session-start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/agent-busy",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/agent-idle",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/subagent-start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/subagent-stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ATMUX_AGENT=$ATMUX_AGENT ATMUX_SESSION=$ATMUX_SESSION ATMUX_WORKSPACE=$ATMUX_WORKSPACE $ATMUX_DIR/scripts/hooks/agent-idle-reset",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
