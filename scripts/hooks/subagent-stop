@@ -5,6 +5,7 @@ COUNT_FILE="$STATUS_DIR/${AGENT_NAME}.subagents"
 LOCK="$STATUS_DIR/${AGENT_NAME}.lock"
 
 tries=0; while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.01; tries=$((tries+1)); [[ $tries -ge 100 ]] && break; done
+# shellcheck disable=SC2064  # intentional: $LOCK is already set
 trap "rmdir '$LOCK' 2>/dev/null" EXIT
 
 current=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
