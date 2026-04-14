@@ -1,17 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve through symlinks to find the real install directory
+SEND_SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SEND_SOURCE" ]]; do
+  SEND_DIR="$(cd "$(dirname "$SEND_SOURCE")" && pwd)"
+  SEND_SOURCE="$(readlink "$SEND_SOURCE")"
+  [[ "$SEND_SOURCE" != /* ]] && SEND_SOURCE="$SEND_DIR/$SEND_SOURCE"
+done
+ATMUX_DIR="$(cd "$(dirname "$SEND_SOURCE")" && pwd)"
+
 SESSION="atmux"
+
+# Find the workspace (.atmux/ in cwd or parents)
+find_workspace() {
+  local d
+  d="$(pwd)"
+  while true; do
+    if [[ -d "$d/.atmux" ]]; then
+      echo "$d"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      return 1
+    fi
+    d="$parent"
+  done
+}
+
+WORKSPACE="$(find_workspace 2>/dev/null)" || WORKSPACE=""
+if [[ -n "$WORKSPACE" && -f "$WORKSPACE/.atmux/config.json" ]]; then
+  SESSION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/.atmux/config.json')).get('session', 'atmux'))" 2>/dev/null || echo "atmux")
+fi
 
 usage() {
   cat <<EOF
-Usage: send <agent> <message>
+Usage: send <agent|all> <message>
 
 Send a message to a Claude agent's tmux window.
 
 Examples:
   ./send dev1 "implement the login endpoint from issue #5"
   ./send dev2 "run the full test suite and report results"
+  ./send all "stop what you're doing and run tests"
 EOF
   exit 0
 }
@@ -27,12 +60,35 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   exit 1
 fi
 
-if ! tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | grep -qx "$AGENT"; then
-  echo "Error: No agent named '$AGENT'"
-  echo "Active windows:"
-  tmux list-windows -t "$SESSION" -F "  #W" 2>/dev/null | grep -v "overview" || echo "  (none)"
-  exit 1
-fi
+if [[ "$AGENT" == "all" ]]; then
+  if [[ -z "$WORKSPACE" ]]; then
+    echo "Error: Not in an atmux workspace."
+    exit 1
+  fi
+  agents=$(python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from pathlib import Path
+for a in load_agents(Path('$WORKSPACE')):
+    print(a['name'])
+")
+  if [[ -z "$agents" ]]; then
+    echo "No agents configured."
+    exit 1
+  fi
+  while read -r agent; do
+    tmux send-keys -t "$SESSION:$agent" "$MESSAGE" Enter 2>/dev/null && \
+      echo "Sent to $agent: $MESSAGE" || \
+      echo "Warning: could not send to $agent"
+  done <<< "$agents"
+else
+  if ! tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | grep -qx "$AGENT"; then
+    echo "Error: No agent named '$AGENT'"
+    echo "Active windows:"
+    tmux list-windows -t "$SESSION" -F "  #W" 2>/dev/null | grep -v "overview" || echo "  (none)"
+    exit 1
+  fi
 
-tmux send-keys -t "$SESSION:$AGENT" "$MESSAGE" Enter
-echo "Sent to $AGENT: $MESSAGE"
+  tmux send-keys -t "$SESSION:$AGENT" "$MESSAGE" Enter
+  echo "Sent to $AGENT: $MESSAGE"
+fi

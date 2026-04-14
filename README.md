@@ -52,19 +52,19 @@ The overview window shows real-time agent status:
 ### Dashboard commands
 
 ```
-:add <name> <repo>                   Add agent
-:send <name> <msg>                   Send message to agent
-:remove <name>                       Remove agent
-:heartbeat <name|all> <secs> <msg>   Nudge idle agents periodically
-:heartbeat stop <name|all>           Stop heartbeat
-:stop                                Stop everything
+add <name> <repo>                   Add agent
+send <name> <msg>                   Send message to agent
+remove <name>                       Remove agent
+heartbeat <name|all> <secs> <msg>   Nudge idle agents periodically
+heartbeat stop <name|all>           Stop heartbeat
+stop                                Stop everything
 ```
 
 ### tmux navigation
 
 ```
 Ctrl-a n/p    Next/previous window
-Ctrl-a w      Window picker
+Ctrl-a <n>    Jump to window by number (0=overview, 1=first agent, ...)
 Ctrl-a d      Detach (agents keep running)
 ```
 
@@ -75,12 +75,13 @@ atmux init                              Initialize workspace
 atmux start                             Launch session
 atmux stop                              Stop all agents
 atmux add <name> <repo> [-- flags]      Add agent (extra claude flags after --)
-atmux remove <name>                     Remove agent
-atmux send <name> <msg>                 Send message
+atmux remove <name|all>                 Remove agent(s)
+atmux send <name|all> <msg>             Send message to agent(s)
 atmux list                              List agents
 atmux heartbeat <name|all> <s> <msg>    Set heartbeat
 atmux heartbeat stop <name|all>         Stop heartbeat
 atmux heartbeat list                    List heartbeats
+atmux shell <dir>                       Open a shell window at <dir>
 ```
 
 ### Custom Claude flags
@@ -129,6 +130,16 @@ done
 agents/
   backend/          # Cloned repos
   frontend/
+```
+
+## Standalone scripts
+
+These work from any terminal in the workspace (or subfolder) — you don't need to be inside tmux:
+
+```bash
+send <name|all> <msg>    # Send a message to an agent (or all)
+list                     # List configured agents
+stop                     # Stop all agents and kill the session
 ```
 
 ## Debugging

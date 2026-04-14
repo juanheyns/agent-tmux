@@ -26,6 +26,7 @@ Commands:
   heartbeat <name|all> <secs> <msg> Set a heartbeat for idle agents
   heartbeat stop <name|all>         Stop a heartbeat
   heartbeat list                    List active heartbeats
+  shell <dir>                       Open a new shell window at <dir>
   help                              Show this help
 
 Run 'atmux init' first, then 'atmux start' to launch.
@@ -227,11 +228,11 @@ cmd_add() {
   local agent_dir
   if [[ "$repo" == /* || "$repo" == ./* || "$repo" == ~* ]]; then
     local expanded="${repo/#\~/$HOME}"
-    agent_dir="$(cd "$WORKSPACE" && cd "$expanded" && pwd)"
-    if [[ ! -d "$agent_dir" ]]; then
-      echo "Error: Directory not found: $repo"
-      exit 1
+    if [[ "$expanded" != /* ]]; then
+      expanded="$WORKSPACE/$expanded"
     fi
+    mkdir -p "$expanded"
+    agent_dir="$(cd "$expanded" && pwd)"
   else
     agent_dir="$WORKSPACE/agents/$name"
     if [[ ! -d "$agent_dir/.git" ]]; then
@@ -274,16 +275,9 @@ add_agent(Path('$WORKSPACE'), '$name', '$repo', '$agent_dir', flags='${claude_fl
   fi
 }
 
-cmd_remove() {
-  require_workspace
+_remove_one_agent() {
+  local name="$1"
 
-  local name="${1:-}"
-  if [[ -z "$name" ]]; then
-    echo "Usage: atmux remove <name>"
-    exit 1
-  fi
-
-  # Remove from agents.json
   python3 -c "
 import sys; sys.path.insert(0, '$ATMUX_DIR')
 from src.workspace import remove_agent
@@ -291,17 +285,45 @@ from pathlib import Path
 remove_agent(Path('$WORKSPACE'), '$name')
 "
 
-  # If session running, stop the window
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux send-keys -t "$SESSION:$name" "/exit" Enter 2>/dev/null || true
     sleep 1
     tmux kill-window -t "$SESSION:$name" 2>/dev/null || true
   fi
 
-  # Clean status files
   rm -f "$WORKSPACE/.atmux/status/$name" "$WORKSPACE/.atmux/status/${name}.subagents" "$WORKSPACE/.atmux/status/${name}.repo" 2>/dev/null || true
 
   echo "Removed agent '$name'"
+}
+
+cmd_remove() {
+  require_workspace
+
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    echo "Usage: atmux remove <name|all>"
+    exit 1
+  fi
+
+  if [[ "$name" == "all" ]]; then
+    local agents
+    agents=$(python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from pathlib import Path
+for a in load_agents(Path('$WORKSPACE')):
+    print(a['name'])
+")
+    if [[ -z "$agents" ]]; then
+      echo "No agents configured."
+      exit 0
+    fi
+    while read -r agent; do
+      _remove_one_agent "$agent"
+    done <<< "$agents"
+  else
+    _remove_one_agent "$name"
+  fi
 }
 
 cmd_send() {
@@ -312,7 +334,7 @@ cmd_send() {
   local msg="$*"
 
   if [[ -z "$name" || -z "$msg" ]]; then
-    echo "Usage: atmux send <name> <message>"
+    echo "Usage: atmux send <name|all> <message>"
     exit 1
   fi
 
@@ -321,8 +343,28 @@ cmd_send() {
     exit 1
   fi
 
-  tmux send-keys -t "$SESSION:$name" "$msg" Enter
-  echo "Sent to $name: $msg"
+  if [[ "$name" == "all" ]]; then
+    local agents
+    agents=$(python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from pathlib import Path
+for a in load_agents(Path('$WORKSPACE')):
+    print(a['name'])
+")
+    if [[ -z "$agents" ]]; then
+      echo "No agents configured."
+      exit 1
+    fi
+    while read -r agent; do
+      tmux send-keys -t "$SESSION:$agent" "$msg" Enter 2>/dev/null && \
+        echo "Sent to $agent: $msg" || \
+        echo "Warning: could not send to $agent"
+    done <<< "$agents"
+  else
+    tmux send-keys -t "$SESSION:$name" "$msg" Enter
+    echo "Sent to $name: $msg"
+  fi
 }
 
 cmd_list() {
@@ -396,6 +438,38 @@ set_heartbeat(Path('$WORKSPACE'), '$agent', $interval, '$msg')
   echo "Heartbeat set: $agent every ${interval}s"
 }
 
+cmd_shell() {
+  require_workspace
+
+  local dir="${1:-}"
+
+  if [[ -z "$dir" ]]; then
+    echo "Usage: atmux shell <directory>"
+    exit 1
+  fi
+
+  # Resolve the directory
+  local resolved
+  local expanded="${dir/#\~/$HOME}"
+  if [[ "$expanded" != /* ]]; then
+    expanded="$WORKSPACE/$expanded"
+  fi
+  mkdir -p "$expanded"
+  resolved="$(cd "$expanded" && pwd)"
+
+  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "Error: No atmux session running. Run: atmux start"
+    exit 1
+  fi
+
+  # Use the directory basename as the window name
+  local win_name
+  win_name="$(basename "$resolved")"
+
+  tmux new-window -t "$SESSION" -n "$win_name" -c "$resolved"
+  echo "Opened shell '$win_name' at $resolved"
+}
+
 # --- Dispatch ---
 
 cmd="${1:-start}"
@@ -410,6 +484,7 @@ case "$cmd" in
   send)       cmd_send "$@" ;;
   list|ls)    cmd_list ;;
   heartbeat)  cmd_heartbeat "$@" ;;
+  shell)      cmd_shell "$@" ;;
   -h|--help|help) usage ;;
   *)
     echo "Unknown command: $cmd"

@@ -274,25 +274,26 @@
 atmux start                             <span class="comment"># Launch session (default)</span>
 atmux stop                              <span class="comment"># Stop all agents</span>
 atmux add &lt;name&gt; &lt;repo&gt; [-- flags]      <span class="comment"># Add an agent</span>
-atmux remove &lt;name&gt;                     <span class="comment"># Remove an agent</span>
-atmux send &lt;name&gt; &lt;msg&gt;                 <span class="comment"># Send message to agent</span>
+atmux remove &lt;name|all&gt;                 <span class="comment"># Remove agent(s)</span>
+atmux send &lt;name|all&gt; &lt;msg&gt;             <span class="comment"># Send message to agent(s)</span>
 atmux list                              <span class="comment"># List configured agents</span>
 atmux heartbeat &lt;name|all&gt; &lt;s&gt; &lt;msg&gt;   <span class="comment"># Set heartbeat</span>
 atmux heartbeat stop &lt;name|all&gt;         <span class="comment"># Stop heartbeat</span>
-atmux heartbeat list                    <span class="comment"># List heartbeats</span></pre>
+atmux heartbeat list                    <span class="comment"># List heartbeats</span>
+atmux shell &lt;dir&gt;                       <span class="comment"># Open a shell window</span></pre>
 
     <h3>Dashboard commands</h3>
     <p>Type these in the dashboard's command bar:</p>
-<pre>:add &lt;name&gt; &lt;repo&gt; [-- flags]          <span class="comment"># Add agent</span>
-:send &lt;name&gt; &lt;msg&gt;                     <span class="comment"># Send message</span>
-:remove &lt;name&gt;                         <span class="comment"># Remove agent</span>
-:heartbeat &lt;name|all&gt; &lt;s&gt; &lt;msg&gt;       <span class="comment"># Set heartbeat</span>
-:heartbeat stop &lt;name|all&gt;             <span class="comment"># Stop heartbeat</span>
-:stop                                  <span class="comment"># Stop everything</span></pre>
+<pre>add &lt;name&gt; &lt;repo&gt; [-- flags]          <span class="comment"># Add agent</span>
+send &lt;name&gt; &lt;msg&gt;                     <span class="comment"># Send message</span>
+remove &lt;name&gt;                         <span class="comment"># Remove agent</span>
+heartbeat &lt;name|all&gt; &lt;s&gt; &lt;msg&gt;       <span class="comment"># Set heartbeat</span>
+heartbeat stop &lt;name|all&gt;             <span class="comment"># Stop heartbeat</span>
+stop                                  <span class="comment"># Stop everything</span></pre>
 
     <h3>tmux navigation</h3>
 <pre>Ctrl-a n/p    <span class="comment"># Next/previous window</span>
-Ctrl-a w      <span class="comment"># Window picker</span>
+Ctrl-a &lt;n&gt;    <span class="comment"># Jump to window by number (0=overview, 1=first agent, ...)</span>
 Ctrl-a d      <span class="comment"># Detach (agents keep running)</span></pre>
   </section>
 
@@ -333,6 +334,14 @@ done</pre>
 agents/
   backend/          <span class="comment"># Cloned repos live here</span>
   frontend/</pre>
+  </section>
+
+  <section>
+    <h2>Standalone scripts</h2>
+    <p>These work from any terminal in the workspace directory (or any subfolder) &mdash; you don't need to be inside the tmux session.</p>
+<pre>send &lt;name|all&gt; &lt;msg&gt;    <span class="comment"># Send a message to an agent (or all)</span>
+list                     <span class="comment"># List configured agents</span>
+stop                     <span class="comment"># Stop all agents and kill the session</span></pre>
   </section>
 
   <section>

@@ -396,7 +396,7 @@ class Dashboard:
         row += 1
         nav = [
             ("Ctrl-a n/p", "next/prev window"),
-            ("Ctrl-a w", "window picker"),
+            ("Ctrl-a #", "select window by number"),
             ("Ctrl-a d", "detach"),
         ]
         for key, desc in nav:
@@ -415,7 +415,7 @@ class Dashboard:
             ("stop", "Stop everything and exit"),
         ]
         for cmd, desc in cmds:
-            self._safe_addstr(row, 4, f":{cmd:<30} {desc}", curses.color_pair(C_DIM))
+            self._safe_addstr(row, 4, f"{cmd:<30} {desc}", curses.color_pair(C_DIM))
             row += 1
 
         # Show active heartbeats
