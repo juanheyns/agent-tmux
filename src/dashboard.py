@@ -6,6 +6,13 @@ import subprocess
 import time
 
 from . import config
+from .harness import (
+    build_launch_cmd,
+    ensure_settings,
+    get_exit_command,
+    has_subagent_indicator,
+    is_idle_prompt,
+)
 from .status import agent_summary
 from .status import read_agent_status
 from .workspace import (
@@ -13,6 +20,7 @@ from .workspace import (
     load_config,
     add_agent,
     remove_agent,
+    migrate_workspace,
     load_heartbeats,
     set_heartbeat,
     remove_heartbeat,
@@ -73,6 +81,7 @@ class Dashboard:
     def __init__(self, stdscr):
         self.stdscr = stdscr
         self.ws = config.WORKSPACE_DIR
+        migrate_workspace(self.ws)
         self.session = load_config(self.ws).get("session", "atmux")
         self.running = True
         self.command = ""
@@ -207,15 +216,16 @@ class Dashboard:
             if not lines:
                 continue
 
-            # Check if any line mentions active local agents — means subagents running
+            # Check if pane text indicates active subagents
+            harness_name = agent_def.get("harness", "claude")
             pane_text = " ".join(lines)
-            if "local agent" in pane_text:
+            if has_subagent_indicator(harness_name, pane_text):
                 continue
 
             last = lines[-1]
 
-            # Detect idle: Claude's input prompt or a bare shell prompt
-            if last in (">", "$", "%") or last.startswith("> "):
+            # Detect idle prompt (harness-specific)
+            if is_idle_prompt(harness_name, last):
                 (sd / name).write_text("idle")
                 (sd / f"{name}.subagents").write_text("0")
                 subprocess.run(
@@ -303,6 +313,10 @@ class Dashboard:
             info = agent_summary(name, repo)
             status = info["status"]
             subs = info["subagents"]
+
+            # If subagents are active, the agent is busy regardless of status file
+            if subs > 0 and status != "busy":
+                status = "busy"
 
             if status == "busy":
                 row_attr = curses.color_pair(C_BUSY)
@@ -468,7 +482,7 @@ class Dashboard:
         self._safe_addstr(row, 2, "Commands", curses.A_BOLD)
         row += 1
         cmds = [
-            ("add <name> <repo>", "Add a new Claude agent"),
+            ("add <name> <repo> [--harness X]", "Add a new agent"),
             ("send <name> <msg>", "Send message to agent"),
             ("remove <name>", "Stop and remove agent"),
             ("heartbeat <a|all> <s> <msg>", "Nudge idle agents"),
@@ -573,14 +587,22 @@ class Dashboard:
         self.message_time = time.time()
 
     def _cmd_add(self, args):
-        # Split on -- to extract extra claude flags
+        # Split on -- to extract extra flags
         flags = ""
         if " -- " in args:
             args, flags = args.split(" -- ", 1)
 
+        # Extract --harness option
+        harness_name = "claude"
+        if "--harness " in args:
+            before, rest = args.split("--harness ", 1)
+            harness_parts = rest.strip().split(None, 1)
+            harness_name = harness_parts[0]
+            args = before + (harness_parts[1] if len(harness_parts) > 1 else "")
+
         parts = args.strip().split(None, 1)
         if len(parts) < 2:
-            self._show_message("Usage: add <name> <repo> [-- flags]")
+            self._show_message("Usage: add <name> <repo> [--harness X] [-- flags]")
             return
 
         name, repo = parts
@@ -623,13 +645,15 @@ class Dashboard:
             repo_display = repo
 
         # Persist agent
-        add_agent(self.ws, name, repo_display, work_dir, flags=flags)
+        add_agent(
+            self.ws, name, repo_display, work_dir, flags=flags, harness=harness_name
+        )
 
         # Launch in tmux
-        self._launch_agent(name, work_dir, flags=flags)
+        self._launch_agent(name, work_dir, flags=flags, harness_name=harness_name)
         self._show_message(f"Added agent '{name}' -> {repo_display}")
 
-    def _launch_agent(self, name, work_dir, flags=""):
+    def _launch_agent(self, name, work_dir, flags="", harness_name="claude"):
         atmux_dir = str(config.ATMUX_DIR)
         ws = str(self.ws)
 
@@ -644,12 +668,9 @@ class Dashboard:
         (sd / name).write_text("idle")
         (sd / f"{name}.subagents").write_text("0")
 
-        # Export env vars and launch claude in a single command so env is guaranteed set
-        settings_path = config.SETTINGS_DIR / "agent.json"
-        extra = f" {flags}" if flags else ""
-        launch_cmd = (
-            f"export ATMUX_AGENT={name} ATMUX_SESSION='{self.session}' ATMUX_DIR='{atmux_dir}' ATMUX_WORKSPACE='{ws}' && "
-            f"claude --permission-mode auto --settings '{settings_path}' --name \"{name}\"{extra}"
+        ensure_settings(harness_name, work_dir, atmux_dir)
+        launch_cmd = build_launch_cmd(
+            harness_name, name, atmux_dir, self.session, ws, flags
         )
         subprocess.run(
             ["tmux", "send-keys", "-t", f"{self.session}:{name}", launch_cmd, "Enter"],
@@ -677,9 +698,15 @@ class Dashboard:
             self._show_message("Usage: remove <name>")
             return
 
-        # Send /exit to claude
+        # Look up harness for this agent
+        from .workspace import get_agent
+
+        agent_def = get_agent(self.ws, name)
+        harness_name = (agent_def or {}).get("harness", "claude")
+        exit_cmd = get_exit_command(harness_name)
+
         subprocess.run(
-            ["tmux", "send-keys", "-t", f"{self.session}:{name}", "/exit", "Enter"],
+            ["tmux", "send-keys", "-t", f"{self.session}:{name}", exit_cmd, "Enter"],
             capture_output=True,
         )
         time.sleep(1)

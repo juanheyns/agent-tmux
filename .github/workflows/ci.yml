@@ -34,7 +34,7 @@ jobs:
         run: ruff format --check src/
 
       - name: Validate JSON
-        run: python3 -c "import json, sys; json.load(open('settings/agent.json')); print('agent.json OK')"
+        run: python3 -c "import json, sys; json.load(open('settings/claude/agent.json')); print('agent.json OK')"
 
   test:
     runs-on: ${{ matrix.os }}

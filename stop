@@ -16,11 +16,27 @@ fi
 
 echo "Stopping atmux..."
 
-# Send /exit to all agent windows
+# Build window->exit_command map from agents.json
+ATMUX_DIR="${ATMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+exit_cmds=$(python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from src.harness import get_exit_command
+from pathlib import Path
+for a in load_agents(Path('$WORKSPACE')):
+    print(a['name'] + '\t' + get_exit_command(a.get('harness', 'claude')))
+" 2>/dev/null || true)
+
+# Send exit command to all agent windows
 tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | while read -r window; do
   if [[ "$window" != "overview" ]]; then
     echo "  Stopping $window..."
-    tmux send-keys -t "$SESSION:$window" "/exit" Enter 2>/dev/null || true
+    exit_cmd="/exit"
+    if [[ -n "$exit_cmds" ]]; then
+      matched=$(echo "$exit_cmds" | grep "^${window}	" | cut -f2)
+      [[ -n "$matched" ]] && exit_cmd="$matched"
+    fi
+    tmux send-keys -t "$SESSION:$window" "$exit_cmd" Enter 2>/dev/null || true
   fi
 done
 

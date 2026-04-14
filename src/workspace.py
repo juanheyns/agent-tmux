@@ -57,7 +57,9 @@ def init_workspace(ws: Path) -> None:
     cfg = config_path(ws)
     if not cfg.exists():
         session_name = "atmux-" + ws.resolve().name
-        cfg.write_text(json.dumps({"session": session_name}, indent=2) + "\n")
+        cfg.write_text(
+            json.dumps({"session": session_name, "version": 1}, indent=2) + "\n"
+        )
 
     agents = agents_path(ws)
     if not agents.exists():
@@ -89,15 +91,45 @@ def save_agents(ws: Path, agents: list[dict]) -> None:
     p.write_text(json.dumps(agents, indent=2) + "\n")
 
 
-def add_agent(ws: Path, name: str, repo: str, directory: str, flags: str = "") -> None:
+def add_agent(
+    ws: Path, name: str, repo: str, directory: str, flags: str = "", harness: str = ""
+) -> None:
     """Add an agent to the persisted list."""
     agents = load_agents(ws)
     agents = [a for a in agents if a["name"] != name]
     entry = {"name": name, "repo": repo, "dir": directory}
     if flags:
         entry["flags"] = flags
+    if harness:
+        entry["harness"] = harness
     agents.append(entry)
     save_agents(ws, agents)
+
+
+def migrate_workspace(ws: Path) -> None:
+    """Migrate a workspace created before multi-harness support.
+
+    Adds "harness": "claude" to any agent entries missing it and bumps the
+    config version so the migration only runs once.
+    """
+    cfg = load_config(ws)
+    version = cfg.get("version", 0)
+    if version >= 1:
+        return
+
+    # Backfill harness field on existing agents
+    agents = load_agents(ws)
+    changed = False
+    for a in agents:
+        if "harness" not in a:
+            a["harness"] = "claude"
+            changed = True
+    if changed:
+        save_agents(ws, agents)
+
+    # Stamp version so we don't re-run
+    cfg["version"] = 1
+    config_path(ws).write_text(json.dumps(cfg, indent=2) + "\n")
 
 
 def remove_agent(ws: Path, name: str) -> None:

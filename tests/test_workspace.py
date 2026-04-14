@@ -8,6 +8,7 @@ import pytest
 
 from src.workspace import (
     init_workspace,
+    migrate_workspace,
     load_agents,
     save_agents,
     add_agent,
@@ -18,6 +19,7 @@ from src.workspace import (
     set_heartbeat,
     remove_heartbeat,
     find_workspace,
+    config_path,
     status_dir,
     widgets_dir,
 )
@@ -100,6 +102,16 @@ class TestAgents:
             add_agent(ws, f"agent-{i}", f"repo/{i}", f"/tmp/{i}")
         assert len(load_agents(ws)) == 5
 
+    def test_add_agent_with_harness(self, ws):
+        add_agent(ws, "dev1", "owner/repo", "/tmp/fake", harness="codex")
+        agent = get_agent(ws, "dev1")
+        assert agent["harness"] == "codex"
+
+    def test_add_agent_default_has_no_harness_key(self, ws):
+        add_agent(ws, "dev1", "owner/repo", "/tmp/fake")
+        agent = get_agent(ws, "dev1")
+        assert "harness" not in agent
+
 
 class TestHeartbeats:
     def test_empty_by_default(self, ws):
@@ -140,3 +152,65 @@ class TestFindWorkspace:
 
     def test_returns_none_when_missing(self, tmp_path):
         assert find_workspace(tmp_path) is None
+
+
+class TestMigrateWorkspace:
+    def _make_old_workspace(self, tmp_path):
+        """Create a workspace as it would look before multi-harness support."""
+        d = tmp_path / ".atmux"
+        d.mkdir()
+        (d / "status").mkdir()
+        (d / "widgets").mkdir()
+        # Old config: no version field
+        (d / "config.json").write_text(json.dumps({"session": "atmux-old"}) + "\n")
+        # Old agents: no harness field
+        agents = [
+            {"name": "dev1", "repo": "owner/repo", "dir": "/tmp/a"},
+            {"name": "dev2", "repo": "other/repo", "dir": "/tmp/b", "flags": "--model sonnet"},
+        ]
+        (d / "agents.json").write_text(json.dumps(agents, indent=2) + "\n")
+        return tmp_path
+
+    def test_adds_harness_to_existing_agents(self, tmp_path):
+        ws = self._make_old_workspace(tmp_path)
+        migrate_workspace(ws)
+        agents = load_agents(ws)
+        assert all(a["harness"] == "claude" for a in agents)
+
+    def test_preserves_existing_fields(self, tmp_path):
+        ws = self._make_old_workspace(tmp_path)
+        migrate_workspace(ws)
+        agents = load_agents(ws)
+        assert agents[0]["name"] == "dev1"
+        assert agents[1]["flags"] == "--model sonnet"
+
+    def test_stamps_version(self, tmp_path):
+        ws = self._make_old_workspace(tmp_path)
+        migrate_workspace(ws)
+        cfg = load_config(ws)
+        assert cfg["version"] == 1
+
+    def test_idempotent(self, tmp_path):
+        ws = self._make_old_workspace(tmp_path)
+        migrate_workspace(ws)
+        migrate_workspace(ws)  # should not error or double-modify
+        agents = load_agents(ws)
+        assert len(agents) == 2
+        assert all(a["harness"] == "claude" for a in agents)
+
+    def test_skips_already_migrated(self, ws):
+        """New workspaces (version >= 1) should be skipped."""
+        add_agent(ws, "dev1", "repo", "/tmp/a", harness="codex")
+        migrate_workspace(ws)
+        # Should NOT overwrite codex -> claude
+        agent = get_agent(ws, "dev1")
+        assert agent["harness"] == "codex"
+
+    def test_no_agents_still_stamps_version(self, tmp_path):
+        d = tmp_path / ".atmux"
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps({"session": "atmux-empty"}) + "\n")
+        (d / "agents.json").write_text("[]" + "\n")
+        migrate_workspace(tmp_path)
+        cfg = load_config(tmp_path)
+        assert cfg["version"] == 1

@@ -19,7 +19,7 @@ Commands:
   init                              Initialize a new workspace
   start                             Launch the atmux session (or just: atmux)
   stop                              Stop all agents and the session
-  add <name> <repo> [-- flags]      Add a new agent (extra claude flags after --)
+  add <name> <repo> [--harness X] [-- flags]  Add a new agent (default: claude)
   remove <name>                     Remove an agent
   send <name> <msg>                 Send a message to an agent
   list                              List configured agents
@@ -57,6 +57,13 @@ require_workspace() {
     echo "Error: Not in an atmux workspace. Run 'atmux init' first."
     exit 1
   }
+  # Auto-migrate older workspaces
+  python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import migrate_workspace
+from pathlib import Path
+migrate_workspace(Path('$WORKSPACE'))
+" 2>/dev/null || true
   SESSION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/.atmux/config.json')).get('session', 'atmux'))" 2>/dev/null || echo "atmux")
 }
 
@@ -89,9 +96,33 @@ cmd_start() {
     echo "Error: tmux is not installed. Run: brew install tmux"
     exit 1
   fi
-  if ! command -v claude &>/dev/null; then
-    echo "Error: claude is not installed."
-    exit 1
+  # Check that all required harness binaries are available
+  agents_json="$WORKSPACE/.atmux/agents.json"
+  if [[ -f "$agents_json" ]]; then
+    required_binaries=$(python3 -c "
+import json, sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.harness import get_harness, DEFAULT_HARNESS
+agents = json.load(open('$agents_json'))
+seen = set()
+for a in agents:
+    h = a.get('harness', DEFAULT_HARNESS)
+    seen.add(get_harness(h)['binary'])
+if not seen:
+    seen.add(get_harness(DEFAULT_HARNESS)['binary'])
+for b in sorted(seen):
+    print(b)
+" 2>/dev/null || echo "claude")
+    for bin in $required_binaries; do
+      if ! command -v "$bin" &>/dev/null; then
+        echo "Error: $bin is not installed (required by at least one agent)."
+        exit 1
+      fi
+    done
+  else
+    if ! command -v claude &>/dev/null; then
+      echo "Error: claude is not installed."
+      exit 1
+    fi
   fi
 
   # Handle existing session
@@ -126,14 +157,14 @@ cmd_start() {
       python3 -c "
 import json
 for a in json.load(open('$agents_json')):
-    print(a['name'] + '\t' + a['dir'] + '\t' + a.get('flags', ''))
-" | while IFS=$'\t' read -r name agent_dir agent_flags; do
+    print(a['name'] + '\t' + a['dir'] + '\t' + a.get('flags', '') + '\t' + a.get('harness', 'claude'))
+" | while IFS=$'\t' read -r name agent_dir agent_flags agent_harness; do
         if [[ ! -d "$agent_dir" ]]; then
           echo "  Skipping $name — directory not found: $agent_dir"
           continue
         fi
 
-        echo "  Starting $name -> $agent_dir"
+        echo "  Starting $name ($agent_harness) -> $agent_dir"
 
         tmux new-window -t "$SESSION" -n "$name" -c "$agent_dir"
 
@@ -141,15 +172,17 @@ for a in json.load(open('$agents_json')):
         echo "idle" > "$WORKSPACE/.atmux/status/$name"
         echo "0" > "$WORKSPACE/.atmux/status/${name}.subagents"
 
-        # Export env vars and launch claude in a single command so env is guaranteed set
-        settings_path="$ATMUX_DIR/settings/agent.json"
-        local extra=""
-        [[ -n "$agent_flags" ]] && extra=" $agent_flags"
-        tmux send-keys -t "$SESSION:$name" \
-          "export ATMUX_AGENT=$name ATMUX_SESSION='$SESSION' ATMUX_DIR='$ATMUX_DIR' ATMUX_WORKSPACE='$WORKSPACE' && claude --permission-mode auto --settings '$settings_path' --name \"$name\"$extra" Enter
+        # Build launch command via harness module
+        launch_cmd=$(python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.harness import build_launch_cmd, ensure_settings
+ensure_settings('$agent_harness', '$agent_dir', '$ATMUX_DIR')
+print(build_launch_cmd('$agent_harness', '$name', '$ATMUX_DIR', '$SESSION', '$WORKSPACE', '${agent_flags}'))
+")
+        tmux send-keys -t "$SESSION:$name" "$launch_cmd" Enter
       done
 
-      # Wait for Claude sessions to initialize
+      # Wait for agent sessions to initialize
       sleep 3
     fi
   fi
@@ -171,11 +204,28 @@ cmd_stop() {
 
   echo "Stopping atmux..."
 
-  # Send /exit to all agent windows
+  # Build window->exit_command map from agents.json
+  local exit_cmds
+  exit_cmds=$(python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from src.harness import get_exit_command
+from pathlib import Path
+for a in load_agents(Path('$WORKSPACE')):
+    print(a['name'] + '\t' + get_exit_command(a.get('harness', 'claude')))
+" 2>/dev/null || true)
+
+  # Send exit command to all agent windows
   tmux list-windows -t "$SESSION" -F "#W" 2>/dev/null | while read -r window; do
     if [[ "$window" != "overview" ]]; then
       echo "  Stopping $window..."
-      tmux send-keys -t "$SESSION:$window" "/exit" Enter 2>/dev/null || true
+      local exit_cmd="/exit"
+      if [[ -n "$exit_cmds" ]]; then
+        local matched
+        matched=$(echo "$exit_cmds" | grep "^${window}	" | cut -f2)
+        [[ -n "$matched" ]] && exit_cmd="$matched"
+      fi
+      tmux send-keys -t "$SESSION:$window" "$exit_cmd" Enter 2>/dev/null || true
     fi
   done
 
@@ -198,19 +248,24 @@ cmd_add() {
   local repo="${2:-}"
   shift 2 2>/dev/null || true
 
-  # Collect extra claude flags after --
-  local claude_flags=""
+  # Parse --harness and collect extra flags after --
+  local agent_harness="claude"
+  local agent_flags=""
   local found_dashdash=false
-  for arg in "$@"; do
+  while [[ $# -gt 0 ]]; do
     if [[ "$found_dashdash" == true ]]; then
-      claude_flags="$claude_flags $arg"
-    elif [[ "$arg" == "--" ]]; then
+      agent_flags="$agent_flags $1"
+    elif [[ "$1" == "--" ]]; then
       found_dashdash=true
+    elif [[ "$1" == "--harness" ]]; then
+      shift
+      agent_harness="${1:-claude}"
     fi
+    shift
   done
 
   if [[ -z "$name" || -z "$repo" ]]; then
-    echo "Usage: atmux add <name> <repo-or-path> [-- extra-claude-flags]"
+    echo "Usage: atmux add <name> <repo-or-path> [--harness claude|codex] [-- extra-flags]"
     echo ""
     echo "  <repo-or-path> can be:"
     echo "    owner/repo                      GitHub shorthand"
@@ -219,8 +274,9 @@ cmd_add() {
     echo "    /absolute/path                  Existing local directory"
     echo "    ./relative/path                 Existing local directory"
     echo ""
-    echo "  Extra flags are passed to claude on launch, e.g.:"
+    echo "  Extra flags are passed to the harness on launch, e.g.:"
     echo "    atmux add dev1 owner/repo -- --model sonnet"
+    echo "    atmux add dev2 /path --harness codex"
     exit 1
   fi
 
@@ -249,16 +305,17 @@ cmd_add() {
     fi
   fi
 
-  # Persist to agents.json (with optional flags)
+  # Persist to agents.json (with optional flags and harness)
   python3 -c "
 import sys, json; sys.path.insert(0, '$ATMUX_DIR')
 from src.workspace import add_agent
 from pathlib import Path
-add_agent(Path('$WORKSPACE'), '$name', '$repo', '$agent_dir', flags='${claude_flags# }')
+add_agent(Path('$WORKSPACE'), '$name', '$repo', '$agent_dir', flags='${agent_flags# }', harness='$agent_harness')
 "
   echo "Added agent '$name' -> $repo"
   echo "  dir: $agent_dir"
-  [[ -n "$claude_flags" ]] && echo "  flags:$claude_flags"
+  echo "  harness: $agent_harness"
+  [[ -n "$agent_flags" ]] && echo "  flags:$agent_flags"
 
   # If session is running, also launch it live
   if tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -268,15 +325,30 @@ add_agent(Path('$WORKSPACE'), '$name', '$repo', '$agent_dir', flags='${claude_fl
     echo "idle" > "$WORKSPACE/.atmux/status/$name"
     echo "0" > "$WORKSPACE/.atmux/status/${name}.subagents"
 
-    settings_path="$ATMUX_DIR/settings/agent.json"
-    tmux send-keys -t "$SESSION:$name" \
-      "export ATMUX_AGENT=$name ATMUX_SESSION='$SESSION' ATMUX_DIR='$ATMUX_DIR' ATMUX_WORKSPACE='$WORKSPACE' && claude --permission-mode auto --settings '$settings_path' --name \"$name\"$claude_flags" Enter
+    launch_cmd=$(python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.harness import build_launch_cmd, ensure_settings
+ensure_settings('$agent_harness', '$agent_dir', '$ATMUX_DIR')
+print(build_launch_cmd('$agent_harness', '$name', '$ATMUX_DIR', '$SESSION', '$WORKSPACE', '${agent_flags# }'))
+")
+    tmux send-keys -t "$SESSION:$name" "$launch_cmd" Enter
     echo "Agent launched in session."
   fi
 }
 
 _remove_one_agent() {
   local name="$1"
+
+  # Look up exit command before removing from agents.json
+  local exit_cmd
+  exit_cmd=$(python3 -c "
+import sys; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import get_agent
+from src.harness import get_exit_command
+from pathlib import Path
+a = get_agent(Path('$WORKSPACE'), '$name')
+print(get_exit_command((a or {}).get('harness', 'claude')))
+" 2>/dev/null || echo "/exit")
 
   python3 -c "
 import sys; sys.path.insert(0, '$ATMUX_DIR')
@@ -286,7 +358,7 @@ remove_agent(Path('$WORKSPACE'), '$name')
 "
 
   if tmux has-session -t "$SESSION" 2>/dev/null; then
-    tmux send-keys -t "$SESSION:$name" "/exit" Enter 2>/dev/null || true
+    tmux send-keys -t "$SESSION:$name" "$exit_cmd" Enter 2>/dev/null || true
     sleep 1
     tmux kill-window -t "$SESSION:$name" 2>/dev/null || true
   fi
@@ -382,7 +454,8 @@ if not agents:
     print('  No agents configured. Use: atmux add <name> <repo>')
 else:
     for a in agents:
-        print(f\"  {a['name']:<16} {a['repo']:<30} {a['dir']}\")
+        h = a.get('harness', 'claude')
+        print(f\"  {a['name']:<16} [{h:<6}] {a['repo']:<30} {a['dir']}\")
 "
 }
 
