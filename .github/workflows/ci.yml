@@ -55,6 +55,9 @@ jobs:
             sudo apt-get update && sudo apt-get install -y tmux
           fi
 
+      - name: Install test dependencies
+        run: pip install pytest
+
       - name: Python unit tests
         run: python3 -m pytest tests/ -v
 

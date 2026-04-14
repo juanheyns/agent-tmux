@@ -1,4 +1,5 @@
 """Workspace state management — .atmux/ directory."""
+
 import json
 from pathlib import Path
 
@@ -115,6 +116,7 @@ def get_agent(ws: Path, name: str) -> dict | None:
 
 
 # -- Heartbeats --
+
 
 def heartbeats_path(ws: Path) -> Path:
     return ws / WORKSPACE_DIR_NAME / HEARTBEATS_FILE

@@ -1,4 +1,5 @@
 """Entry point: python3 -m src <command> [args]"""
+
 import sys
 from pathlib import Path
 
@@ -13,8 +14,10 @@ def main():
         # Optional workspace path argument
         if len(sys.argv) >= 3:
             from . import config
+
             config.set_workspace(Path(sys.argv[2]))
         from .dashboard import run
+
         run()
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)

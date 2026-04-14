@@ -1,4 +1,5 @@
 """Curses-based dashboard for atmux."""
+
 import curses
 import os
 import subprocess
@@ -7,8 +8,15 @@ import time
 from . import config
 from .status import agent_summary
 from .status import read_agent_status
-from .workspace import (load_agents, load_config, add_agent, remove_agent,
-                        load_heartbeats, set_heartbeat, remove_heartbeat)
+from .workspace import (
+    load_agents,
+    load_config,
+    add_agent,
+    remove_agent,
+    load_heartbeats,
+    set_heartbeat,
+    remove_heartbeat,
+)
 
 
 def _is_local_path(repo: str) -> bool:
@@ -16,8 +24,12 @@ def _is_local_path(repo: str) -> bool:
 
 
 def _is_url(repo: str) -> bool:
-    return repo.startswith("https://") or repo.startswith("http://") or \
-           repo.startswith("git@") or repo.startswith("ssh://")
+    return (
+        repo.startswith("https://")
+        or repo.startswith("http://")
+        or repo.startswith("git@")
+        or repo.startswith("ssh://")
+    )
 
 
 def _clone_repo(repo: str, dest: str) -> subprocess.CompletedProcess:
@@ -25,12 +37,14 @@ def _clone_repo(repo: str, dest: str) -> subprocess.CompletedProcess:
     if _is_url(repo):
         return subprocess.run(
             ["git", "clone", "--quiet", repo, dest],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
     else:
         return subprocess.run(
             ["gh", "repo", "clone", repo, dest, "--", "--quiet"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
 
 
@@ -47,12 +61,12 @@ C_ALERT = 6
 def init_colors():
     curses.start_color()
     curses.use_default_colors()
-    curses.init_pair(C_IDLE, 245, -1)           # gray
-    curses.init_pair(C_BUSY, 214, -1)           # yellow
-    curses.init_pair(C_ACTIVE, 82, -1)          # bright green
-    curses.init_pair(C_HEADER, 255, 236)        # white on dark gray
-    curses.init_pair(C_DIM, 245, -1)            # gray
-    curses.init_pair(C_ALERT, 196, -1)          # red
+    curses.init_pair(C_IDLE, 245, -1)  # gray
+    curses.init_pair(C_BUSY, 214, -1)  # yellow
+    curses.init_pair(C_ACTIVE, 82, -1)  # bright green
+    curses.init_pair(C_HEADER, 255, 236)  # white on dark gray
+    curses.init_pair(C_DIM, 245, -1)  # gray
+    curses.init_pair(C_ALERT, 196, -1)  # red
 
 
 class Dashboard:
@@ -118,12 +132,21 @@ class Dashboard:
 
                 try:
                     subprocess.run(
-                        ["tmux", "send-keys", "-t", f"{self.session}:{name}", "-l", msg],
-                        capture_output=True, timeout=5,
+                        [
+                            "tmux",
+                            "send-keys",
+                            "-t",
+                            f"{self.session}:{name}",
+                            "-l",
+                            msg,
+                        ],
+                        capture_output=True,
+                        timeout=5,
                     )
                     subprocess.run(
                         ["tmux", "send-keys", "-t", f"{self.session}:{name}", "Enter"],
-                        capture_output=True, timeout=5,
+                        capture_output=True,
+                        timeout=5,
                     )
                     self._last_nudge[name] = now
                 except Exception:
@@ -161,8 +184,18 @@ class Dashboard:
             # Capture the last few lines of the pane
             try:
                 r = subprocess.run(
-                    ["tmux", "capture-pane", "-t", f"{self.session}:{name}", "-p", "-l", "5"],
-                    capture_output=True, text=True, timeout=5,
+                    [
+                        "tmux",
+                        "capture-pane",
+                        "-t",
+                        f"{self.session}:{name}",
+                        "-p",
+                        "-l",
+                        "5",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if r.returncode != 0:
                     continue
@@ -170,7 +203,7 @@ class Dashboard:
             except Exception:
                 continue
 
-            lines = [l.strip() for l in pane.strip().split("\n") if l.strip()]
+            lines = [line.strip() for line in pane.strip().split("\n") if line.strip()]
             if not lines:
                 continue
 
@@ -186,13 +219,25 @@ class Dashboard:
                 (sd / name).write_text("idle")
                 (sd / f"{name}.subagents").write_text("0")
                 subprocess.run(
-                    ["tmux", "set-window-option", "-t", f"{self.session}:{name}",
-                     "window-status-style", "fg=colour245"],
+                    [
+                        "tmux",
+                        "set-window-option",
+                        "-t",
+                        f"{self.session}:{name}",
+                        "window-status-style",
+                        "fg=colour245",
+                    ],
                     capture_output=True,
                 )
                 subprocess.run(
-                    ["tmux", "set-window-option", "-t", f"{self.session}:{name}",
-                     "window-status-current-style", "fg=colour235,bg=colour248,bold"],
+                    [
+                        "tmux",
+                        "set-window-option",
+                        "-t",
+                        f"{self.session}:{name}",
+                        "window-status-current-style",
+                        "fg=colour235,bg=colour248,bold",
+                    ],
                     capture_output=True,
                 )
 
@@ -226,7 +271,9 @@ class Dashboard:
 
     def _draw_header(self, row, w):
         title = " atmux "
-        self._safe_addstr(row, 0, title.center(w), curses.color_pair(C_HEADER) | curses.A_BOLD)
+        self._safe_addstr(
+            row, 0, title.center(w), curses.color_pair(C_HEADER) | curses.A_BOLD
+        )
         row += 1
         self._safe_addstr(row, 0, f"  workspace: {self.ws}", curses.color_pair(C_DIM))
         row += 2
@@ -244,7 +291,9 @@ class Dashboard:
         if not agents:
             self._safe_addstr(row, 4, "No agents configured", curses.color_pair(C_DIM))
             row += 1
-            self._safe_addstr(row, 4, "Use :add <name> <repo> to create one", curses.color_pair(C_DIM))
+            self._safe_addstr(
+                row, 4, "Use :add <name> <repo> to create one", curses.color_pair(C_DIM)
+            )
             row += 2
             return row
 
@@ -262,14 +311,18 @@ class Dashboard:
 
             # Indicator: ● busy, ○ idle, +N subagents
             if status == "busy":
-                self._safe_addstr(row, 3, "\u25cf", curses.color_pair(C_BUSY) | curses.A_BOLD)
+                self._safe_addstr(
+                    row, 3, "\u25cf", curses.color_pair(C_BUSY) | curses.A_BOLD
+                )
             elif status == "idle":
                 self._safe_addstr(row, 3, "\u25cb", curses.color_pair(C_DIM))
             else:
                 self._safe_addstr(row, 3, "?", curses.color_pair(C_DIM))
 
             if subs > 0:
-                self._safe_addstr(row, 4, f"+{subs}", curses.color_pair(C_BUSY) | curses.A_BOLD)
+                self._safe_addstr(
+                    row, 4, f"+{subs}", curses.color_pair(C_BUSY) | curses.A_BOLD
+                )
 
             line = f" {name:<14} {repo}"
             self._safe_addstr(row, 7, line, row_attr)
@@ -281,20 +334,26 @@ class Dashboard:
     # -- Widgets --
 
     def _widget_env(self):
-        return {**os.environ,
-                "ATMUX_WORKSPACE": str(self.ws),
-                "ATMUX_DIR": str(config.ATMUX_DIR)}
+        return {
+            **os.environ,
+            "ATMUX_WORKSPACE": str(self.ws),
+            "ATMUX_DIR": str(config.ATMUX_DIR),
+        }
 
     def _widget_setup(self, script):
         """Run script --setup to get widget metadata. Returns dict with title, interval."""
         try:
             r = subprocess.run(
                 [str(script), "--setup"],
-                capture_output=True, text=True, timeout=5,
-                cwd=str(self.ws), env=self._widget_env(),
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=str(self.ws),
+                env=self._widget_env(),
             )
             if r.returncode == 0 and r.stdout.strip():
                 import json
+
                 return json.loads(r.stdout)
         except Exception:
             pass
@@ -343,9 +402,11 @@ class Dashboard:
             try:
                 r = subprocess.run(
                     [meta["script"]],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                     timeout=max(10, meta["interval"]),
-                    cwd=str(self.ws), env=self._widget_env(),
+                    cwd=str(self.ws),
+                    env=self._widget_env(),
                 )
                 duration = time.time() - start
                 lines = r.stdout.rstrip("\n").split("\n") if r.stdout.strip() else []
@@ -445,7 +506,9 @@ class Dashboard:
         bot_line = h - 1
 
         if self.message and time.time() - self.message_time < 3:
-            self._safe_addstr(top_line - 1, 2, self.message, curses.color_pair(C_ACTIVE))
+            self._safe_addstr(
+                top_line - 1, 2, self.message, curses.color_pair(C_ACTIVE)
+            )
 
         self._safe_addstr(top_line, 0, "\u2500" * w, curses.color_pair(C_DIM))
 
@@ -602,7 +665,8 @@ class Dashboard:
         try:
             subprocess.run(
                 ["tmux", "send-keys", "-t", f"{self.session}:{agent}", msg, "Enter"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             self._show_message(f"Sent to {agent}")
         except Exception as e:
@@ -640,7 +704,9 @@ class Dashboard:
         """heartbeat <agent|all> <seconds> <message>  or  heartbeat stop <agent|all>  or  heartbeat list"""
         parts = args.strip().split(None, 2)
         if not parts:
-            self._show_message("heartbeat <agent|all> <secs> <msg> | heartbeat stop <agent|all> | heartbeat list")
+            self._show_message(
+                "heartbeat <agent|all> <secs> <msg> | heartbeat stop <agent|all> | heartbeat list"
+            )
             return
 
         if parts[0] == "list":
@@ -678,7 +744,8 @@ class Dashboard:
         if stop_script.exists():
             subprocess.run(
                 [str(stop_script)],
-                capture_output=True, timeout=30,
+                capture_output=True,
+                timeout=30,
                 env={**os.environ, "ATMUX_WORKSPACE": str(self.ws)},
             )
         self.running = False
