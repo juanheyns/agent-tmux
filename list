@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve through symlinks to find the real install directory
+LIST_SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$LIST_SOURCE" ]]; do
+  LIST_DIR="$(cd "$(dirname "$LIST_SOURCE")" && pwd)"
+  LIST_SOURCE="$(readlink "$LIST_SOURCE")"
+  [[ "$LIST_SOURCE" != /* ]] && LIST_SOURCE="$LIST_DIR/$LIST_SOURCE"
+done
+ATMUX_DIR="$(cd "$(dirname "$LIST_SOURCE")" && pwd)"
+
+# Find the workspace (.atmux/ in cwd or parents)
+find_workspace() {
+  local d
+  d="$(pwd)"
+  while true; do
+    if [[ -d "$d/.atmux" ]]; then
+      echo "$d"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      return 1
+    fi
+    d="$parent"
+  done
+}
+
+WORKSPACE="$(find_workspace)" || {
+  echo "Error: Not in an atmux workspace. Run 'atmux init' first."
+  exit 1
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<EOF
+Usage: list
+
+List agents configured in the current atmux workspace.
+EOF
+  exit 0
+fi
+
+echo "Workspace: $WORKSPACE"
+echo ""
+
+python3 -c "
+import sys, json; sys.path.insert(0, '$ATMUX_DIR')
+from src.workspace import load_agents
+from pathlib import Path
+agents = load_agents(Path('$WORKSPACE'))
+if not agents:
+    print('  No agents configured. Use: atmux add <name> <repo>')
+else:
+    for a in agents:
+        print(f\"  {a['name']:<16} {a['repo']:<30} {a['dir']}\")
+"
