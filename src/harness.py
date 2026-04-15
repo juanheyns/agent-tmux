@@ -30,7 +30,9 @@ DEFAULT_HARNESS = "claude"
 
 
 def get_harness(name: str) -> dict:
-    """Return harness config dict. Raises KeyError if unknown."""
+    """Return harness config dict. Falls back to default for empty/missing name."""
+    if not name:
+        name = DEFAULT_HARNESS
     if name not in HARNESSES:
         raise KeyError(f"Unknown harness: {name!r}. Available: {', '.join(HARNESSES)}")
     return HARNESSES[name]

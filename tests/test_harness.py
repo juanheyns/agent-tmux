@@ -22,6 +22,10 @@ class TestGetHarness:
         h = get_harness("codex")
         assert h["binary"] == "codex"
 
+    def test_empty_string_defaults_to_claude(self):
+        h = get_harness("")
+        assert h["binary"] == "claude"
+
     def test_unknown_raises(self):
         with pytest.raises(KeyError, match="Unknown harness"):
             get_harness("unknown")

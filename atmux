@@ -157,8 +157,11 @@ for b in sorted(seen):
       python3 -c "
 import json
 for a in json.load(open('$agents_json')):
-    print(a['name'] + '\t' + a['dir'] + '\t' + a.get('flags', '') + '\t' + a.get('harness', 'claude'))
-" | while IFS=$'\t' read -r name agent_dir agent_flags agent_harness; do
+    print(a['name'] + '\t' + a['dir'] + '\t' + a.get('harness', 'claude') + '\t' + a.get('flags', ''))
+" | while IFS=$'\t' read -r name agent_dir agent_harness agent_flags; do
+        # Default harness for pre-migration workspaces
+        [[ -z "$agent_harness" ]] && agent_harness="claude"
+
         if [[ ! -d "$agent_dir" ]]; then
           echo "  Skipping $name — directory not found: $agent_dir"
           continue
