@@ -36,16 +36,28 @@ jobs:
           echo "SHA256: $SHA256"
 
       - name: Update Homebrew tap
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
-          repository: juanheyns/homebrew-tmux
-          event-type: update-formula
-          client-payload: |
-            {
-              "formula": "atmux",
-              "version": "${{ steps.release_info.outputs.version }}",
-              "tag": "${{ steps.release_info.outputs.tag }}",
-              "sha256": "${{ steps.release_info.outputs.sha256 }}",
-              "tarball_url": "${{ steps.release_info.outputs.tarball_url }}"
-            }
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN secret is not set; aborting." >&2
+            exit 1
+          fi
+          TAG="${{ steps.release_info.outputs.tag }}"
+          VERSION="${{ steps.release_info.outputs.version }}"
+          URL="${{ steps.release_info.outputs.tarball_url }}"
+          SHA256="${{ steps.release_info.outputs.sha256 }}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/juanheyns/homebrew-tap.git" tap
+          FORMULA="tap/Formula/atmux.rb"
+          sed -i "s|url \".*\"|url \"${URL}\"|" "$FORMULA"
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" "$FORMULA"
+          cd tap
+          git config user.email "actions@github.com"
+          git config user.name  "GitHub Actions"
+          git add Formula/atmux.rb
+          if git diff --staged --quiet; then
+            echo "Formula unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "atmux ${TAG}"
+          git push

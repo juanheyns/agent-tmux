@@ -5,7 +5,7 @@ Run multiple Claude Code agents in a single tmux session. Add agents, point them
 ## Install
 
 ```bash
-brew install juanheyns/tmux/atmux
+brew install juanheyns/tap/atmux
 ```
 
 Or manually:
